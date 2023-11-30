@@ -68,5 +68,8 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "glTFRuntime|PointCloud", meta = (AutoCreateRefTerm = "ASCIIPointCloudConfig"))
 	static ULidarPointCloud* LoadPointCloudFromXYZ(UglTFRuntimeAsset* Asset, const FglTFRuntimeASCIIPointCloudConfig& ASCIIPointCloudConfig);
+
+	UFUNCTION(BlueprintCallable, Category = "glTFRuntime|PointCloud", meta = (AutoCreateRefTerm = "ASCIIPointCloudConfig"))
+	static ULidarPointCloud* LoadPointCloudFromPCD(UglTFRuntimeAsset* Asset, FTransform& ViewPoint);
 	
 };
