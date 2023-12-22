@@ -1,7 +1,7 @@
-// Copyright 2022, Roberto De Ioris.
-
+// Copyright 2022-2023, Roberto De Ioris.
 
 #include "glTFRuntimePointCloudLibrary.h"
+#include "Async/ParallelFor.h"
 
 bool UglTFRuntimePointCloudLibrary::HasPointCloud(UglTFRuntimeAsset* Asset, const int32 MeshIndex)
 {
@@ -161,59 +161,70 @@ ULidarPointCloud* UglTFRuntimePointCloudLibrary::LoadPointCloudFromXYZ(UglTFRunt
 		return nullptr;
 	}
 
-	for (int32 LineIndex = Config.LinesToSkip; LineIndex < Lines.Num(); LineIndex++)
-	{
-		const TArray<FString>& Line = Lines[LineIndex];
+	const int32 NumLines = Lines.Num() - Config.LinesToSkip;
 
-		FLidarPointCloudPoint Point;
+	Points.AddUninitialized(NumLines);
 
-		if (Config.XYZColumns.X >= 0 && Config.XYZColumns.X < Line.Num())
+	ParallelFor(NumLines, [&](const int32 LineIndexOffset)
 		{
-			Point.Location.X = FCString::Atof(*(Line[Config.XYZColumns.X]));
-		}
+			const int32 LineIndex = LineIndexOffset + Config.LinesToSkip;
 
-		if (Config.XYZColumns.Y >= 0 && Config.XYZColumns.Y < Line.Num())
-		{
-			Point.Location.Y = FCString::Atof(*(Line[Config.XYZColumns.Y]));
-		}
+			const TArray<FString>& Line = Lines[LineIndex];
 
-		if (Config.XYZColumns.Z >= 0 && Config.XYZColumns.Z < Line.Num())
-		{
-			Point.Location.Z = FCString::Atof(*(Line[Config.XYZColumns.Z]));
-		}
+			FLidarPointCloudPoint Point;
 
-		if (Config.RGBColumns.X >= 0 && Config.RGBColumns.X < Line.Num())
-		{
-			Point.Color.R = FCString::Atof(*(Line[Config.RGBColumns.X])) * (Config.bFloatColors ? 255 : 1);
-		}
+			if (Config.XYZColumns.X >= 0 && Config.XYZColumns.X < Line.Num())
+			{
+				Point.Location.X = FCString::Atof(*(Line[Config.XYZColumns.X]));
+			}
 
-		if (Config.RGBColumns.Y >= 0 && Config.RGBColumns.Y < Line.Num())
-		{
-			Point.Color.G = FCString::Atof(*(Line[Config.RGBColumns.Y])) * (Config.bFloatColors ? 255 : 1);
-		}
+			if (Config.XYZColumns.Y >= 0 && Config.XYZColumns.Y < Line.Num())
+			{
+				Point.Location.Y = FCString::Atof(*(Line[Config.XYZColumns.Y]));
+			}
 
-		if (Config.RGBColumns.Z >= 0 && Config.RGBColumns.Z < Line.Num())
-		{
-			Point.Color.B = FCString::Atof(*(Line[Config.RGBColumns.Z])) * (Config.bFloatColors ? 255 : 1);
-		}
+			if (Config.XYZColumns.Z >= 0 && Config.XYZColumns.Z < Line.Num())
+			{
+				Point.Location.Z = FCString::Atof(*(Line[Config.XYZColumns.Z]));
+			}
 
-		if (Config.NormalColumns.X >= 0 && Config.NormalColumns.X < Line.Num())
-		{
-			Point.Normal.X = FCString::Atof(*(Line[Config.NormalColumns.X]));
-		}
+			if (Config.RGBColumns.X >= 0 && Config.RGBColumns.X < Line.Num())
+			{
+				Point.Color.R = FCString::Atof(*(Line[Config.RGBColumns.X])) * (Config.bFloatColors ? 255 : 1);
+			}
 
-		if (Config.NormalColumns.Y >= 0 && Config.NormalColumns.Y < Line.Num())
-		{
-			Point.Normal.Y = FCString::Atof(*(Line[Config.NormalColumns.Y]));
-		}
+			if (Config.RGBColumns.Y >= 0 && Config.RGBColumns.Y < Line.Num())
+			{
+				Point.Color.G = FCString::Atof(*(Line[Config.RGBColumns.Y])) * (Config.bFloatColors ? 255 : 1);
+			}
 
-		if (Config.NormalColumns.Z >= 0 && ASCIIPointCloudConfig.NormalColumns.Z < Line.Num())
-		{
-			Point.Normal.Z = FCString::Atof(*(Line[Config.NormalColumns.Z]));
-		}
+			if (Config.RGBColumns.Z >= 0 && Config.RGBColumns.Z < Line.Num())
+			{
+				Point.Color.B = FCString::Atof(*(Line[Config.RGBColumns.Z])) * (Config.bFloatColors ? 255 : 1);
+			}
 
-		Points.Add(MoveTemp(Point));
-	}
+			if (Config.NormalColumns.X >= 0 && Config.NormalColumns.X < Line.Num())
+			{
+				Point.Normal.X = FCString::Atof(*(Line[Config.NormalColumns.X]));
+			}
+
+			if (Config.NormalColumns.Y >= 0 && Config.NormalColumns.Y < Line.Num())
+			{
+				Point.Normal.Y = FCString::Atof(*(Line[Config.NormalColumns.Y]));
+			}
+
+			if (Config.NormalColumns.Z >= 0 && ASCIIPointCloudConfig.NormalColumns.Z < Line.Num())
+			{
+				Point.Normal.Z = FCString::Atof(*(Line[Config.NormalColumns.Z]));
+			}
+
+			if (Config.AlphaColumn >= 0 && ASCIIPointCloudConfig.AlphaColumn < Line.Num())
+			{
+				Point.Color.A = FCString::Atof(*(Line[Config.AlphaColumn])) * (Config.bFloatColors ? 255 : 1);
+			}
+
+			Points[LineIndexOffset] = MoveTemp(Point);
+		});
 
 
 	return ULidarPointCloud::CreateFromData(Points, false);

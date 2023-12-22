@@ -13,19 +13,22 @@ struct FglTFRuntimeASCIIPointCloudConfig
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime|PointCloud")
 	FIntVector XYZColumns;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime|PointCloud")
 	FIntVector RGBColumns;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime|PointCloud")
 	FIntVector NormalColumns;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime|PointCloud")
+	int32 AlphaColumn;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime|PointCloud")
 	int32 LinesToSkip;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime|PointCloud")
 	bool bFloatColors;
 
 	FglTFRuntimeASCIIPointCloudConfig()
@@ -41,6 +44,8 @@ struct FglTFRuntimeASCIIPointCloudConfig
 		NormalColumns.X = 6;
 		NormalColumns.Y = 7;
 		NormalColumns.Z = 8;
+
+		AlphaColumn = 9;
 
 		LinesToSkip = 0;
 
