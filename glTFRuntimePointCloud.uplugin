@@ -18,7 +18,8 @@
 		{
 			"Name": "glTFRuntimePointCloud",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"WhitelistPlatforms": [ "Win64", "Mac", "Linux" ]
 		}
 	],
 	"Plugins": [
@@ -28,7 +29,8 @@
 		},
 		{
 			"Name": "LidarPointCloud",
-			"Enabled": true
+			"Enabled": true,
+			"PlatformDenyList": [ "Android" ]
 		}
 	]
 }
