@@ -31,7 +31,7 @@ ULidarPointCloud* UglTFRuntimePointCloudLibrary::LoadPointCloudFromMesh(UglTFRun
 	}
 
 	TArray<FglTFRuntimePrimitive> Primitives;
-	if (!Asset->GetParser()->LoadPrimitives(JsonMeshObject.ToSharedRef(), Primitives, FglTFRuntimeMaterialsConfig()))
+	if (!Asset->GetParser()->LoadPrimitives(JsonMeshObject.ToSharedRef(), Primitives, FglTFRuntimeMaterialsConfig(), false /* do not triangulate points */))
 	{
 		return nullptr;
 	}
@@ -80,7 +80,7 @@ ULidarPointCloud* UglTFRuntimePointCloudLibrary::LoadPointCloudFromMeshes(UglTFR
 		}
 
 		TArray<FglTFRuntimePrimitive> Primitives;
-		if (!Asset->GetParser()->LoadPrimitives(JsonMeshObject.ToSharedRef(), Primitives, FglTFRuntimeMaterialsConfig()))
+		if (!Asset->GetParser()->LoadPrimitives(JsonMeshObject.ToSharedRef(), Primitives, FglTFRuntimeMaterialsConfig(), false /* do not triangulate points */))
 		{
 			continue;
 		}
