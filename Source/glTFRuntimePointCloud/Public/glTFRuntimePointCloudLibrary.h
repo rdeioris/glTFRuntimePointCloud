@@ -31,6 +31,9 @@ struct FglTFRuntimeASCIIPointCloudConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime|PointCloud")
 	bool bFloatColors;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime|PointCloud")
+	bool bComputeColumnsMinMax;
+
 	FglTFRuntimeASCIIPointCloudConfig()
 	{
 		XYZColumns.X = 0;
@@ -50,11 +53,13 @@ struct FglTFRuntimeASCIIPointCloudConfig
 		LinesToSkip = 0;
 
 		bFloatColors = false;
+
+		bComputeColumnsMinMax = false;
 	}
 };
 
 /**
- * 
+ *
  */
 UCLASS()
 class GLTFRUNTIMEPOINTCLOUD_API UglTFRuntimePointCloudLibrary : public UBlueprintFunctionLibrary
@@ -76,5 +81,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "glTFRuntime|PointCloud", meta = (AutoCreateRefTerm = "ASCIIPointCloudConfig"))
 	static ULidarPointCloud* LoadPointCloudFromPCD(UglTFRuntimeAsset* Asset, FTransform& ViewPoint);
-	
+
+	static ULidarPointCloud* LoadPointCloudFromXYZWithFilter(UglTFRuntimeAsset* Asset, TFunction<void(FLidarPointCloudPoint&, const TArray<FString>&, const FglTFRuntimeASCIIPointCloudConfig&) > StringFilter, TFunction<void(FLidarPointCloudPoint&, const TArray<double>&, const TArray<double>&, const TArray<double>&, const FglTFRuntimeASCIIPointCloudConfig&)> FloatFilter, const FglTFRuntimeASCIIPointCloudConfig& ASCIIPointCloudConfig);
+
 };

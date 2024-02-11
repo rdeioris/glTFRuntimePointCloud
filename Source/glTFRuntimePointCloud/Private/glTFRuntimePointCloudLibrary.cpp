@@ -1,4 +1,4 @@
-// Copyright 2022-2023, Roberto De Ioris.
+// Copyright 2022-2024, Roberto De Ioris.
 
 #include "glTFRuntimePointCloudLibrary.h"
 #include "Async/ParallelFor.h"
@@ -116,6 +116,11 @@ ULidarPointCloud* UglTFRuntimePointCloudLibrary::LoadPointCloudFromMeshes(UglTFR
 
 ULidarPointCloud* UglTFRuntimePointCloudLibrary::LoadPointCloudFromXYZ(UglTFRuntimeAsset* Asset, const FglTFRuntimeASCIIPointCloudConfig& ASCIIPointCloudConfig)
 {
+	return LoadPointCloudFromXYZWithFilter(Asset, nullptr, nullptr, ASCIIPointCloudConfig);
+}
+
+ULidarPointCloud* UglTFRuntimePointCloudLibrary::LoadPointCloudFromXYZWithFilter(UglTFRuntimeAsset* Asset, TFunction<void(FLidarPointCloudPoint&, const TArray<FString>&, const FglTFRuntimeASCIIPointCloudConfig&)> StringFilter, TFunction<void(FLidarPointCloudPoint&, const TArray<double>&, const TArray<double>&, const TArray<double>&, const FglTFRuntimeASCIIPointCloudConfig&)> FloatFilter, const FglTFRuntimeASCIIPointCloudConfig& ASCIIPointCloudConfig)
+{
 	if (!Asset)
 	{
 		return nullptr;
@@ -125,107 +130,296 @@ ULidarPointCloud* UglTFRuntimePointCloudLibrary::LoadPointCloudFromXYZ(UglTFRunt
 
 	TArray<FLidarPointCloudPoint> Points;
 
-	TArray<TArray<FString>> Lines;
 	TArray<FString> CurrentLine;
-	FString CurrentString;
+	TPair<int64, int64> CurrentString = { -1, 0 };
+
+	TArray<TPair<int64, int64>> BinaryLines;
+
+	float StartTime = FPlatformTime::Seconds();
 
 	for (int64 Index = 0; Index < Blob.Num(); Index++)
 	{
-		const char Char = static_cast<char>(Blob[Index]);
-		if (Char == ' ' || Char == '\t' || Char == '\r' || Char == '\n')
+		const uint8 Char = Blob[Index];
+
+		if (Char == '\r' || Char == '\n')
 		{
-			if (!CurrentString.IsEmpty())
+			if (CurrentString.Value > 0)
 			{
-				CurrentLine.Add(CurrentString);
+				BinaryLines.Add(CurrentString);
 			}
-			CurrentString = "";
-			if (Char == '\r' || Char == '\n')
-			{
-				if (CurrentLine.Num() > 0)
-				{
-					Lines.Add(CurrentLine);
-				}
-				CurrentLine.Empty();
-			}
+			CurrentString.Key = -1;
+			CurrentString.Value = 0;
 		}
 		else
 		{
-			CurrentString += Char;
+			if (CurrentString.Key < 0)
+			{
+				CurrentString.Key = Index;
+			}
+			CurrentString.Value++;
 		}
+	}
+
+	if (CurrentString.Value > 0)
+	{
+		BinaryLines.Add(CurrentString);
 	}
 
 	const FglTFRuntimeASCIIPointCloudConfig& Config = ASCIIPointCloudConfig;
 
-	if (Config.LinesToSkip < 0 || Config.LinesToSkip > Lines.Num())
+	if (Config.LinesToSkip < 0 || Config.LinesToSkip > BinaryLines.Num())
 	{
 		return nullptr;
 	}
 
-	const int32 NumLines = Lines.Num() - Config.LinesToSkip;
+	const int32 NumLines = BinaryLines.Num() - Config.LinesToSkip;
 
 	Points.AddUninitialized(NumLines);
 
-	ParallelFor(NumLines, [&](const int32 LineIndexOffset)
+	if (Config.bComputeColumnsMinMax)
+	{
+
+		TArray<TArray<double>> Lines;
+		Lines.AddUninitialized(NumLines);
+
+		ParallelFor(NumLines, [&](const int32 LineIndexOffset)
+			{
+				const int32 LineIndex = LineIndexOffset + Config.LinesToSkip;
+
+				const TPair<int64, int64>& BinaryPair = BinaryLines[LineIndex];
+
+				const int64 PairLen = BinaryPair.Key + BinaryPair.Value;
+
+				TArray<double> Line;
+
+				int64 CurrentStringOffset = -1;
+				int64 CurrentStringLen = 0;
+
+				for (int64 Index = BinaryPair.Key; Index < PairLen; Index++)
+				{
+					const uint8 Char = Blob[Index];
+					if (Char == ' ' || Char == '\t')
+					{
+						if (CurrentStringLen > 0)
+						{
+							Line.Add(FCString::Atod(*FString(CurrentStringLen, reinterpret_cast<const ANSICHAR*>(Blob.GetData() + CurrentStringOffset))));
+						}
+						CurrentStringOffset = -1;
+						CurrentStringLen = 0;
+					}
+					else
+					{
+						if (CurrentStringOffset < 0)
+						{
+							CurrentStringOffset = Index;
+						}
+						CurrentStringLen++;
+					}
+				}
+
+				if (CurrentStringLen > 0)
+				{
+					Line.Add(FCString::Atod(*FString(CurrentStringLen, reinterpret_cast<const ANSICHAR*>(Blob.GetData() + CurrentStringOffset))));
+				}
+
+				Lines[LineIndexOffset] = MoveTemp(Line);
+			});
+
+		TArray<double> MinValues;
+		TArray<double> MaxValues;
+
+		for (const TArray<double>& Line : Lines)
 		{
-			const int32 LineIndex = LineIndexOffset + Config.LinesToSkip;
-
-			const TArray<FString>& Line = Lines[LineIndex];
-
-			FLidarPointCloudPoint Point;
-
-			if (Config.XYZColumns.X >= 0 && Config.XYZColumns.X < Line.Num())
+			for (int32 LineIndex = 0; LineIndex < Line.Num(); LineIndex++)
 			{
-				Point.Location.X = FCString::Atof(*(Line[Config.XYZColumns.X]));
-			}
+				if (!MinValues.IsValidIndex(LineIndex))
+				{
+					MinValues.Add(Line[LineIndex]);
+				}
+				else
+				{
+					MinValues[LineIndex] = FMath::Min(MinValues[LineIndex], Line[LineIndex]);
+				}
 
-			if (Config.XYZColumns.Y >= 0 && Config.XYZColumns.Y < Line.Num())
+				if (!MaxValues.IsValidIndex(LineIndex))
+				{
+					MaxValues.Add(Line[LineIndex]);
+				}
+				else
+				{
+					MaxValues[LineIndex] = FMath::Max(MaxValues[LineIndex], Line[LineIndex]);
+				}
+			}
+		}
+
+		ParallelFor(NumLines, [&](const int32 LineIndexOffset)
 			{
-				Point.Location.Y = FCString::Atof(*(Line[Config.XYZColumns.Y]));
-			}
+				TArray<double> Line = Lines[LineIndexOffset];
+				FLidarPointCloudPoint Point;
 
-			if (Config.XYZColumns.Z >= 0 && Config.XYZColumns.Z < Line.Num())
+				if (Config.XYZColumns.X >= 0 && Config.XYZColumns.X < Line.Num())
+				{
+					Point.Location.X = Line[Config.XYZColumns.X];
+				}
+
+				if (Config.XYZColumns.Y >= 0 && Config.XYZColumns.Y < Line.Num())
+				{
+					Point.Location.Y = Line[Config.XYZColumns.Y];
+				}
+
+				if (Config.XYZColumns.Z >= 0 && Config.XYZColumns.Z < Line.Num())
+				{
+					Point.Location.Z = Line[Config.XYZColumns.Z];
+				}
+
+				if (Config.RGBColumns.X >= 0 && Config.RGBColumns.X < Line.Num())
+				{
+					Point.Color.R = Line[Config.RGBColumns.X] * (Config.bFloatColors ? 255 : 1);
+				}
+
+				if (Config.RGBColumns.Y >= 0 && Config.RGBColumns.Y < Line.Num())
+				{
+					Point.Color.G = Line[Config.RGBColumns.Y] * (Config.bFloatColors ? 255 : 1);
+				}
+
+				if (Config.RGBColumns.Z >= 0 && Config.RGBColumns.Z < Line.Num())
+				{
+					Point.Color.B = Line[Config.RGBColumns.Z] * (Config.bFloatColors ? 255 : 1);
+				}
+
+				if (Config.NormalColumns.X >= 0 && Config.NormalColumns.X < Line.Num())
+				{
+					Point.Normal.X = Line[Config.NormalColumns.X];
+				}
+
+				if (Config.NormalColumns.Y >= 0 && Config.NormalColumns.Y < Line.Num())
+				{
+					Point.Normal.Y = Line[Config.NormalColumns.Y];
+				}
+
+				if (Config.NormalColumns.Z >= 0 && ASCIIPointCloudConfig.NormalColumns.Z < Line.Num())
+				{
+					Point.Normal.Z = Line[Config.NormalColumns.Z];
+				}
+
+				if (Config.AlphaColumn >= 0 && ASCIIPointCloudConfig.AlphaColumn < Line.Num())
+				{
+					Point.Color.A = Line[Config.AlphaColumn] * (Config.bFloatColors ? 255 : 1);
+				}
+
+				if (FloatFilter)
+				{
+					FloatFilter(Point, Line, MinValues, MaxValues, ASCIIPointCloudConfig);
+				}
+
+				Points[LineIndexOffset] = MoveTemp(Point);
+			});
+	}
+	else
+	{
+
+		ParallelFor(NumLines, [&](const int32 LineIndexOffset)
 			{
-				Point.Location.Z = FCString::Atof(*(Line[Config.XYZColumns.Z]));
-			}
+				const int32 LineIndex = LineIndexOffset + Config.LinesToSkip;
 
-			if (Config.RGBColumns.X >= 0 && Config.RGBColumns.X < Line.Num())
-			{
-				Point.Color.R = FCString::Atof(*(Line[Config.RGBColumns.X])) * (Config.bFloatColors ? 255 : 1);
-			}
+				const TPair<int64, int64>& BinaryPair = BinaryLines[LineIndex];
 
-			if (Config.RGBColumns.Y >= 0 && Config.RGBColumns.Y < Line.Num())
-			{
-				Point.Color.G = FCString::Atof(*(Line[Config.RGBColumns.Y])) * (Config.bFloatColors ? 255 : 1);
-			}
+				const int64 PairLen = BinaryPair.Key + BinaryPair.Value;
 
-			if (Config.RGBColumns.Z >= 0 && Config.RGBColumns.Z < Line.Num())
-			{
-				Point.Color.B = FCString::Atof(*(Line[Config.RGBColumns.Z])) * (Config.bFloatColors ? 255 : 1);
-			}
+				TArray<FString> Line;
 
-			if (Config.NormalColumns.X >= 0 && Config.NormalColumns.X < Line.Num())
-			{
-				Point.Normal.X = FCString::Atof(*(Line[Config.NormalColumns.X]));
-			}
+				int64 CurrentStringOffset = -1;
+				int64 CurrentStringLen = 0;
 
-			if (Config.NormalColumns.Y >= 0 && Config.NormalColumns.Y < Line.Num())
-			{
-				Point.Normal.Y = FCString::Atof(*(Line[Config.NormalColumns.Y]));
-			}
+				for (int64 Index = BinaryPair.Key; Index < PairLen; Index++)
+				{
+					const uint8 Char = Blob[Index];
+					if (Char == ' ' || Char == '\t')
+					{
+						if (CurrentStringLen > 0)
+						{
+							Line.Add(FString(CurrentStringLen, reinterpret_cast<const ANSICHAR*>(Blob.GetData() + CurrentStringOffset)));
+						}
+						CurrentStringOffset = -1;
+						CurrentStringLen = 0;
+					}
+					else
+					{
+						if (CurrentStringOffset < 0)
+						{
+							CurrentStringOffset = Index;
+						}
+						CurrentStringLen++;
+					}
+				}
 
-			if (Config.NormalColumns.Z >= 0 && ASCIIPointCloudConfig.NormalColumns.Z < Line.Num())
-			{
-				Point.Normal.Z = FCString::Atof(*(Line[Config.NormalColumns.Z]));
-			}
+				if (CurrentStringLen > 0)
+				{
+					Line.Add(FString(CurrentStringLen, reinterpret_cast<const ANSICHAR*>(Blob.GetData() + CurrentStringOffset)));
+				}
 
-			if (Config.AlphaColumn >= 0 && ASCIIPointCloudConfig.AlphaColumn < Line.Num())
-			{
-				Point.Color.A = FCString::Atof(*(Line[Config.AlphaColumn])) * (Config.bFloatColors ? 255 : 1);
-			}
+				FLidarPointCloudPoint Point;
 
-			Points[LineIndexOffset] = MoveTemp(Point);
-		});
+				if (Config.XYZColumns.X >= 0 && Config.XYZColumns.X < Line.Num())
+				{
+					Point.Location.X = FCString::Atof(*(Line[Config.XYZColumns.X]));
+				}
 
+				if (Config.XYZColumns.Y >= 0 && Config.XYZColumns.Y < Line.Num())
+				{
+					Point.Location.Y = FCString::Atof(*(Line[Config.XYZColumns.Y]));
+				}
+
+				if (Config.XYZColumns.Z >= 0 && Config.XYZColumns.Z < Line.Num())
+				{
+					Point.Location.Z = FCString::Atof(*(Line[Config.XYZColumns.Z]));
+				}
+
+				if (Config.RGBColumns.X >= 0 && Config.RGBColumns.X < Line.Num())
+				{
+					Point.Color.R = FCString::Atof(*(Line[Config.RGBColumns.X])) * (Config.bFloatColors ? 255 : 1);
+				}
+
+				if (Config.RGBColumns.Y >= 0 && Config.RGBColumns.Y < Line.Num())
+				{
+					Point.Color.G = FCString::Atof(*(Line[Config.RGBColumns.Y])) * (Config.bFloatColors ? 255 : 1);
+				}
+
+				if (Config.RGBColumns.Z >= 0 && Config.RGBColumns.Z < Line.Num())
+				{
+					Point.Color.B = FCString::Atof(*(Line[Config.RGBColumns.Z])) * (Config.bFloatColors ? 255 : 1);
+				}
+
+				if (Config.NormalColumns.X >= 0 && Config.NormalColumns.X < Line.Num())
+				{
+					Point.Normal.X = FCString::Atof(*(Line[Config.NormalColumns.X]));
+				}
+
+				if (Config.NormalColumns.Y >= 0 && Config.NormalColumns.Y < Line.Num())
+				{
+					Point.Normal.Y = FCString::Atof(*(Line[Config.NormalColumns.Y]));
+				}
+
+				if (Config.NormalColumns.Z >= 0 && ASCIIPointCloudConfig.NormalColumns.Z < Line.Num())
+				{
+					Point.Normal.Z = FCString::Atof(*(Line[Config.NormalColumns.Z]));
+				}
+
+				if (Config.AlphaColumn >= 0 && ASCIIPointCloudConfig.AlphaColumn < Line.Num())
+				{
+					Point.Color.A = FCString::Atof(*(Line[Config.AlphaColumn])) * (Config.bFloatColors ? 255 : 1);
+				}
+
+				if (StringFilter)
+				{
+					StringFilter(Point, Line, ASCIIPointCloudConfig);
+				}
+
+				Points[LineIndexOffset] = MoveTemp(Point);
+			});
+	}
+
+	UE_LOG(LogGLTFRuntime, Log, TEXT("Processed %d points in %f seconds"), NumLines, FPlatformTime::Seconds() - StartTime);
 
 	return ULidarPointCloud::CreateFromData(Points, false);
 }
